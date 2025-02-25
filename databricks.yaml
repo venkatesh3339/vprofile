@@ -1,12 +1,11 @@
-name: Databricks Job Deployment
+name: Databricks Job Creation/Update
 
 on:
   push:
     branches:
-      - main
+      - main  # Adjust the branch as needed
     paths:
-      - 'job.json'
-      - 'dev.conf'
+      - 'job_config.json'  # Trigger only when this file changes
 
 jobs:
   deploy:
@@ -16,60 +15,53 @@ jobs:
     - name: Checkout repository
       uses: actions/checkout@v4
 
-    - name: Load dev.conf as environment variables
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+
+    - name: Install Databricks CLI
       run: |
-        while IFS='=' read -r key value; do
-          echo "$key=$value" >> $GITHUB_ENV
-        done < dev.conf
+        pip install databricks-cli jq
 
-    - name: Substitute values from dev.conf into job.json
-      run: |
-        jq --argjson env "$(jq -n 'env | with_entries(select(.key | startswith("DEV_")))')" \
-          '.config = (.config + $env)' job.json > processed_job.json
-
-        # Display the processed JSON
-        cat processed_job.json
-
-    - name: Authenticate with Azure and Databricks
+    - name: Authenticate with Databricks
       env:
-        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-        ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-        ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
         DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+        DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
       run: |
-        # Authenticate with Azure
-        az login --service-principal -u $ARM_CLIENT_ID -p $ARM_CLIENT_SECRET --tenant $ARM_TENANT_ID
-
-        # Get AAD token for Databricks authentication
-        export DATABRICKS_AAD_TOKEN=$(az account get-access-token --resource=https://databricks.azure.com --query accessToken --output tsv)
-
-        # Configure Databricks CLI with Azure AD
-        databricks configure --host $DATABRICKS_HOST --aad-token $DATABRICKS_AAD_TOKEN
-
-        # Save token to environment
-        echo "DATABRICKS_AAD_TOKEN=$DATABRICKS_AAD_TOKEN" >> $GITHUB_ENV
+        # Validate authentication
+        databricks jobs list || exit 1
 
     - name: Check if Job Exists
       id: check_job
+      env:
+        DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+        DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
       run: |
-        JOB_NAME=$(jq -r '.name' processed_job.json)
+        JOB_NAME=$(jq -r '.name' job_config.json)
         JOB_ID=$(databricks jobs list --output json | jq -r --arg name "$JOB_NAME" '.jobs[] | select(.settings.name == $name) | .job_id')
 
         if [ -z "$JOB_ID" ]; then
-          echo "Job does not exist, will create a new job"
-          echo "job_exists=false" >> $GITHUB_ENV
+          echo "Job does not exist, creating a new job..."
+          echo "JOB_EXISTS=false" >> $GITHUB_ENV
         else
-          echo "Job exists with ID: $JOB_ID, will update the job"
-          echo "job_exists=true" >> $GITHUB_ENV
-          echo "job_id=$JOB_ID" >> $GITHUB_ENV
+          echo "Job exists with ID: $JOB_ID, updating job..."
+          echo "JOB_EXISTS=true" >> $GITHUB_ENV
+          echo "JOB_ID=$JOB_ID" >> $GITHUB_ENV
         fi
 
     - name: Create New Job
-      if: env.job_exists == 'false'
+      if: env.JOB_EXISTS == 'false'
+      env:
+        DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+        DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
       run: |
-        databricks jobs create --json @processed_job.json --debug
+        databricks jobs create --json-file job_config.json
 
     - name: Update Existing Job
-      if: env.job_exists == 'true'
+      if: env.JOB_EXISTS == 'true'
+      env:
+        DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+        DATABRICKS_TOKEN: ${{ secrets.DATABRICKS_TOKEN }}
       run: |
-        databricks jobs reset --job-id ${{ env.job_id }} --json @processed_job.json --debug
+        databricks jobs reset --job-id $JOB_ID --json-file job_config.json

@@ -1,0 +1,75 @@
+name: Databricks Job Deployment
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'job.json'
+      - 'dev.conf'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Load dev.conf as environment variables
+      run: |
+        while IFS='=' read -r key value; do
+          echo "$key=$value" >> $GITHUB_ENV
+        done < dev.conf
+
+    - name: Substitute values from dev.conf into job.json
+      run: |
+        jq --argjson env "$(jq -n 'env | with_entries(select(.key | startswith("DEV_")))')" \
+          '.config = (.config + $env)' job.json > processed_job.json
+
+        # Display the processed JSON
+        cat processed_job.json
+
+    - name: Authenticate with Azure and Databricks
+      env:
+        ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        ARM_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+        ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}
+      run: |
+        # Authenticate with Azure
+        az login --service-principal -u $ARM_CLIENT_ID -p $ARM_CLIENT_SECRET --tenant $ARM_TENANT_ID
+
+        # Get AAD token for Databricks authentication
+        export DATABRICKS_AAD_TOKEN=$(az account get-access-token --resource=https://databricks.azure.com --query accessToken --output tsv)
+
+        # Configure Databricks CLI with Azure AD
+        databricks configure --host $DATABRICKS_HOST --aad-token $DATABRICKS_AAD_TOKEN
+
+        # Save token to environment
+        echo "DATABRICKS_AAD_TOKEN=$DATABRICKS_AAD_TOKEN" >> $GITHUB_ENV
+
+    - name: Check if Job Exists
+      id: check_job
+      run: |
+        JOB_NAME=$(jq -r '.name' processed_job.json)
+        JOB_ID=$(databricks jobs list --output json | jq -r --arg name "$JOB_NAME" '.jobs[] | select(.settings.name == $name) | .job_id')
+
+        if [ -z "$JOB_ID" ]; then
+          echo "Job does not exist, will create a new job"
+          echo "job_exists=false" >> $GITHUB_ENV
+        else
+          echo "Job exists with ID: $JOB_ID, will update the job"
+          echo "job_exists=true" >> $GITHUB_ENV
+          echo "job_id=$JOB_ID" >> $GITHUB_ENV
+        fi
+
+    - name: Create New Job
+      if: env.job_exists == 'false'
+      run: |
+        databricks jobs create --json @processed_job.json --debug
+
+    - name: Update Existing Job
+      if: env.job_exists == 'true'
+      run: |
+        databricks jobs reset --job-id ${{ env.job_id }} --json @processed_job.json --debug

@@ -1,0 +1,77 @@
+# This workflow validates, deploys, and runs the specified bundle
+# within a pre-production target named "dev".
+name: "Dev deployment"
+
+# Ensure that only a single job or workflow using the same concurrency group
+# runs at a time.
+concurrency: 1
+
+# Trigger this workflow whenever a pull request is opened against the repo's
+# main branch or an existing pull request's head branch is updated.
+
+#on:
+#  pull_request:
+#    types:
+#      - opened
+#      - synchronize
+#    branches:
+#      - master
+
+on:
+  push:
+    branches: 
+      - dev
+
+jobs:
+  # Used by the "pipeline_update" job to deploy the bundle.
+  # Bundle validation is automatically performed as part of this deployment.
+  # If validation fails, this workflow fails.
+  deploy:
+    name: "Deploy bundle"
+    runs-on: ubuntu-latest
+    environment: dev
+    steps:
+      # Check out this repo, so that this workflow can access it.
+      - uses: actions/checkout@v4
+
+      # Download the Databricks CLI.
+      # See https://github.com/databricks/setup-cli
+      - uses: databricks/setup-cli@main
+      #- run: databricks configure --host https://dbc-99999.cloud.databricks.com --token 9999999
+      # Deploy the bundle to the "dev" target as defined
+      # in the bundle's settings file.
+      - run: |
+          env
+          databricks bundle deploy -t dev
+        env:
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+          DATABRICKS_HOST: ${{ vars.DBX_HOST}}
+          DATABRICKS_CLIENT_ID: ${{ vars.DATABRICKS_CLIENT_ID }}
+
+  # Validate, deploy, and then run the bundle.
+  pipeline_update:
+    name: "Run pipeline update"
+    runs-on: ubuntu-latest
+    environment: dev
+    # Run the "deploy" job first.
+    needs:
+      - deploy
+
+    steps:
+      # Check out this repo, so that this workflow can access it.
+      - uses: actions/checkout@v4
+
+      # Use the downloaded Databricks CLI.
+      - uses: databricks/setup-cli@main
+
+      # Run the Databricks workflow named "my-job" as defined in the
+      # bundle that was just deployed.
+      - run: |
+      # databricks bundle run wf_dlk_cdt_dsl_order_ddl_job --refresh-all -t prod
+
+
+        working-directory: .
+        env:
+          DATABRICKS_CLIENT_SECRET: ${{ secrets.DATABRICKS_CLIENT_SECRET }}
+          DATABRICKS_HOST: ${{ vars.DBX_HOST}}
+          DATABRICKS_CLIENT_ID: ${{ vars.DATABRICKS_CLIENT_ID }}

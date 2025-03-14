@@ -1,0 +1,104 @@
+resources:
+  jobs:
+    dental_summarized_claims:
+      name: ${vars.env}_dental_summarized_claims_workflow
+
+      trigger:
+        periodic:
+          interval: 1
+          unit: DAYS
+
+      tasks:
+        - task_key: source_validate
+          job_cluster_key: ${vars.env}_dental_summarized_claims_cluster
+          spark_jar_task:
+            jar_uri: ""
+            main_class_name: com.optum.dsaas.validate.Application
+            parameters:
+              - job_name=${vars.env}_dental_summarized_claims_workflow,audit_table=${vars.audit_table},email_table=${vars.email_table},name=${vars.env} Dental Summarized Claims
+            run_as_repl: true
+          libraries:
+            - jar: ${vars.tasks_source_validate_jar}
+
+        - task_key: load_data
+          depends_on:
+            - task_key: source_validate
+          job_cluster_key: ${vars.env}_dental_summarized_claims_cluster
+          spark_jar_task:
+            jar_uri: ""
+            main_class_name: com.optum.dsaas.Application
+            run_as_repl: true
+          libraries:
+            - jar: ${vars.tasks_load_jar}
+
+        - task_key: sink_validate
+          depends_on:
+            - task_key: load_data
+          job_cluster_key: ${vars.env}_dental_summarized_claims_cluster
+          spark_jar_task:
+            jar_uri: ""
+            main_class_name: com.optum.dsaas.validate.Application
+            parameters:
+              - job_name=${vars.env}_dental_summarized_claims_workflow,audit_table=${vars.audit_table},email_table=${vars.email_table},name=${vars.env} Dental Summarized Claims,type=SINK,copy_state=${vars.tasks_load_data.result_state}
+            run_as_repl: true
+          libraries:
+            - jar: ${vars.tasks_sink_validate_jar}
+
+        - task_key: archive
+          depends_on:
+            - task_key: sink_validate
+          job_cluster_key: ${vars.env}_dental_summarized_claims_cluster
+          spark_jar_task:
+            jar_uri: ""
+            main_class_name: com.optum.dsaas.archive.Application
+            parameters:
+              - state=${vars.tasks_load_data.result_state},sync_validate_state=${vars.tasks_sink_validate.result_state}
+            run_as_repl: true
+          libraries:
+            - jar: ${vars.tasks_archive_jar}
+
+      job_clusters:
+        - job_cluster_key: ${vars.env}_dental_summarized_claims_cluster
+          new_cluster:
+            spark_version: "15.4.x-scala2.12"
+            node_type_id: "Standard_DS3_v2"
+            autoscale:
+              min_workers: 1
+              max_workers: 4
+            spark_conf:
+              spark.databricks.delta.schema.autoMerge.enabled: "true"
+              spark.dental_summarized_claims.config.provider: "local"
+              spark.dental_summarized_claims.config.sinks: ${vars.config_location}/dental_summarized_claims/v1/sinks.yaml
+              spark.app.name: "dental_summarized_claims"
+              spark.dental_summarized_claims.config.providers: ${vars.config_location}/dental_summarized_claims/v1/providers.yaml
+              spark.dental_summarized_claims.config.env: ${vars.config_location}/dental_summarized_claims/v1/env.yaml
+              spark.dental_summarized_claims.config.sources: ${vars.config_location}/dental_summarized_claims/v1/sources.yaml
+              spark.dental_summarized_claims.config.dsaas: ${vars.config_location}/dental_summarized_claims/v1/dsaas.yaml
+              spark.dental_summarized_claims.config.dataset: ${vars.config_location}/dental_summarized_claims/v1/dataset.yaml
+            azure_attributes:
+              first_on_demand: 1
+              availability: "SPOT_WITH_FALLBACK_AZURE"
+              spot_bid_max_price: 100
+            enable_elastic_disk: true
+            policy_id: ${vars.policy_id}
+            data_security_mode: "SINGLE_USER"
+            runtime_engine: "PHOTON"
+
+
+databricks bundle deploy -t dev
+Building repo_name...
+Error: file doesn't exist resources/dsaas_jobs/${vars.tasks_source_validate_jar}
+  at resources.jobs.dental_summarized_claims.tasks[0].libraries[0].jar
+  in resources/dsaas_jobs/dental_summarized_claims.yml:21:15
+
+Error: file doesn't exist resources/dsaas_jobs/${vars.tasks_load_jar}
+  at resources.jobs.dental_summarized_claims.tasks[1].libraries[0].jar
+  in resources/dsaas_jobs/dental_summarized_claims.yml:32:15
+
+Error: file doesn't exist resources/dsaas_jobs/${vars.tasks_sink_validate_jar}
+  at resources.jobs.dental_summarized_claims.tasks[2].libraries[0].jar
+  in resources/dsaas_jobs/dental_summarized_claims.yml:45:15
+
+Error: file doesn't exist resources/dsaas_jobs/${vars.tasks_archive_jar}
+  at resources.jobs.dental_summarized_claims.tasks[3].libraries[0].jar
+  in resources/dsaas_jobs/dental_summarized_claims.yml:58:15

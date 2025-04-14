@@ -1,0 +1,119 @@
+name: Databricks Job Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy:
+        type: boolean
+        description: Whether to deploy the Databricks.
+        default: false
+        required: false
+      override-environment:
+        type: string
+        description: 'Override the environment to deploy to. By default, deploys to the environment specified by the target branch in the configuration file'
+        default: ''
+        required: false
+  pull_request_target:
+  push:
+    branches: # we can limit trigger to push on known terraform branches
+    - dev
+    - qa
+    - stage
+    - prod
+
+jobs:
+  deploy:
+    name: 'Deploy bundle'
+    runs-on: uhg-runner
+
+    env:
+      DATABRICKS_HOST: ${{ vars.DATABRICKS_HOST }}
+      ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+      ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.ARM_CLIENT_SECRET }}
+      DATABRICKS_BUNDLE_ENV: ${{ github.event.inputs['override-environment'] }}
+
+    steps:
+    - name: Print DATABRICKS_BUNDLE_ENV
+      run: echo "DATABRICKS_BUNDLE_ENV=${{ env.DATABRICKS_BUNDLE_ENV }}"
+
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Check directories and files
+      run: |
+        pwd
+        ls -la
+
+    - name: Set up Databricks CLI
+      uses: databricks/setup-cli@main
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+
+    - name: Databricks Bundle Validate
+      run: databricks bundle validate -t ${{ env.DATABRICKS_BUNDLE_ENV }} --debug
+      working-directory: ./databricks-asset-bundle/
+
+    - name: See the files after validate
+      run: ls -la
+      working-directory: ./databricks-asset-bundle/
+
+    - name: Databricks Bundle Deploy
+      run: databricks bundle deploy -t ${{ env.DATABRICKS_BUNDLE_ENV }} --debug
+      working-directory: ./databricks-asset-bundle/
+      
+
+#############################################################
+
+
+name: "Debx Github actions Test"
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        type: boolean
+        description: Whether to apply the terraform. By default, only creates a plan
+        default: false
+        required: false
+      override-environment:
+        type: string
+        description: 'Override the environment to deploy to. By default, deploys to the environment specified by the target branch in the configuration file'
+        default: ''
+        required: false
+  pull_request_target:
+  push:
+    branches:
+      - '**'  # This will trigger the workflow on push to any branch
+
+jobs:
+  apply-terraform:
+    name: OIDC-test
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+      issues: write
+    runs-on: [uhg-runner]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Authenticate Azure CLI using OIDC
+        uses: Azure/login@v2
+        with:
+          client-id: a5308ef9-dad4-4d60-9881-b784ec2577b3
+          subscription-id: bd2e96c1-fa09-4a7f-a6a1-4f1506acc156
+          tenant-id: db05faca-c82a-4b9d-b9c5-0f64b6755421
+          environment: azurecloud
+          allow-no-subscriptions: false
+          audience: api://AzureADTokenExchange
+          auth-type: SERVICE_PRINCIPAL
+
+      - name: Azure CLI script
+        run: az account show
+
+

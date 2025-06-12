@@ -55,3 +55,64 @@ else
   echo "Updating existing job: $JOB_NAME (ID: $EXISTING_JOBS)"
   databricks jobs reset --job-id $EXISTING_JOBS --json-file final_job.json
 fi
+
+
+
+############################################
+
+Prerequisites
+Enterprise Splunk instance access (Cloud or On-prem)
+Azure Databricks workspace with access permissions
+Service Principal or Databricks cluster permissions
+Azure Event Hub or Log Analytics (for log forwarding if needed)
+Network connectivity from Databricks to Splunk (private endpoints/VPN for secure setup)
+
+
+Define What to Monitor
+Decide on what you want to observe in Databricks:
+Cluster performance
+Job runs and failures
+Workspace activity logs (audit)
+Spark application metrics
+DBFS usage
+REST API calls
+
+
+Setup Splunk Environment
+a. Install Splunk Enterprise (if not already)
+Deploy via on-prem server or Splunk Cloud
+Create indexes: databricks_logs, audit_logs, spark_metrics, etc.
+Set up roles, users, access controls
+
+b. Install Splunk Add-ons
+Splunk Add-on for Microsoft Cloud Services
+Splunk Add-on for Databricks (community or custom-built)
+
+
+
+Configure Databricks Logging
+a. Send Audit Logs to Azure Event Hub or Log Analytics
+In Azure Portal:
+Go to Databricks workspace > Diagnostic Settings
+Create a diagnostic setting
+Send to Event Hub or Log Analytics
+Include logs: Audit, Clusters, DBFS, etc.
+
+
+Set up Forwarding to Splunk
+If using Event Hub:
+Use Azure Event Hub to Splunk HEC (via Azure Functions or custom app)
+If using Log Analytics:
+Use Kusto REST API to pull logs into Splunk
+OR use the Splunk Add-on for Microsoft Cloud Services
+
+
+Create Splunk HEC (HTTP Event Collector)
+In Splunk:
+Settings > Data Inputs > HTTP Event Collector > New Token
+Configure Source Type: azure:databricks:audit or similar
+Enable token and save the HEC endpoint URL and token
+
+Send Logs and Metrics to Splunk
+
+Visualize Data in Splunk
